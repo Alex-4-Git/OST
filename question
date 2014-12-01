@@ -1,0 +1,351 @@
+#!/bin/bash
+# test change
+if [ ! -d ~/.question ]
+then 
+	mkdir ~/.question;
+fi
+
+if [ ! -d ~/.question/questions ]
+then
+	mkdir ~/.question/questions;
+fi
+
+if [ ! -d ~/.question/answers ]
+then
+        mkdir ~/.question/answers;
+fi
+
+if [ ! -d ~/.question/votes ]
+then
+        mkdir ~/.question/votes;
+fi
+
+function showUsage(){
+	echo "This is usage";
+	echo -e "\tquestion create name [question]";
+	echo -e "\tquestion answer question_id name [answer]";
+	echo -e "\tquestion list [user]";
+	echo -e "\tquestion vote up|down question_id [answer_id]";
+	echo -e "\tquestion show question_id ...";
+}
+
+
+
+function createQ(){
+	questionid=$1;
+	touch ~/.question/questions/"$questionid"
+	echo $2>~/.question/questions/"$questionid"
+}
+
+function checkContent(){
+ 	if [[ $1 == *====* ]]
+        then
+        	 echo "question can not contian the sequence of characters ====" 1>&2 
+                 exit 1
+        fi
+        if [[ -z $1 ]]
+        then
+                  echo "question can not be empty" 1>&2
+                  exit 1
+        fi
+}
+
+function checkName(){
+ 	if [[ $1 == */* ]]
+        then
+                 echo "name is not allowed to contain forward slash" 1>&2
+        exit 1
+        fi
+}
+
+if [ -z $1 ]
+then 
+	showUsage 
+	exit 1
+else
+case $1 in
+	create)	
+		if [ $# -lt 2 ] || [ $# -gt 3 ]
+		then	
+			showUsage
+			exit 1
+		else 
+			checkName $2
+
+			if [ $(find ~/.question/questions -name "$2" 2>/dev/null) ] 
+			then
+				echo "this name already exists" 1>&2
+				exit 1
+			fi
+			     
+			if [ $# -eq 2 ] 
+			then 
+				echo "Please write your question." 1>&2
+				read question
+			else
+				question=$3
+			fi
+			checkContent $question
+			createQ $2 "$question"
+			exit 0
+		fi
+		;;
+
+	answer)
+		if [ $# -lt 3 ] || [ $# -gt 4 ]
+                then
+                        showUsage
+                        exit 1
+		fi
+		IFS='/' read -ra ARR <<< "$2"
+		user=${ARR[0]}
+		question=${ARR[1]}
+
+		if [ ! $(find /home -maxdepth 1 -type d -name "$user" 2>/dev/null) ]
+		then
+			echo "this user does not exist" 1>&2
+			exit 1
+		fi
+
+		if [ ! $(find /home/"$user"/.question/questions\
+			 -name "$question" 2>/dev/null) ]
+		then 
+			echo "this question does not exist" 1>&2
+			exit 1
+		fi
+
+		if [ $# -eq 4 ]
+		then 
+			answer=$4
+		else 
+			echo "Please write the content of answer" 1>&2
+			read answer
+		fi
+		checkName $3
+		checkContent $answer
+		mkdir -p ~/.question/answers/"$user"/"$question"
+		# see if this name exist		
+		for owner in $( cat /home/unixtool/data/question/users)
+                do
+		
+			if [ $(find /home/$owner/.question/answers/"$user"/"$question" -name "$3" 2>/dev/null ) ]
+			then
+				echo "the name of answer exist" 1>&2
+				exit 1
+			fi
+		done
+		echo $answer > ~/.question/answers/$user/$question/$3
+ 		;;	
+	list)
+		if [  $# -gt 2 ]
+		then 
+			showUsage
+			exit 1
+		fi
+		if [ $# -eq 1 ]
+		then
+			for user in $(cat /home/unixtool/data/question/users)
+			do
+				find /home/$user/.question/questions/ \
+				 -type f 2>/dev/null | awk -v owner=$user '
+				BEGIN{ OFS="/"; FS="/"}
+				{ print owner,$6 }'  
+			done
+				
+			exit 0
+		fi
+		# list the question of a specified user
+		if [ ! $(grep "\b$2\b"  /home/unixtool/data/question/users 2>/dev/null) ]
+		then
+			echo "this user does not exist" 1>&2
+			exit 1
+		fi
+		find /home/$2/.question/questions/ -type f| awk -v owner=$2 '
+		BEGIN{ OFS="/";FS="/"}
+		{
+			print owner,$6
+		}'	
+		;;
+	vote) 
+		if [ $# -lt 3 -o  $# -gt 4 ] || [ $2 != up -a $2 != down ]
+		then
+			showUsage
+			exit 1
+		fi
+		
+		IFS='/' read -ra ARR <<< "$3"
+                user=${ARR[0]}
+                question=${ARR[1]}
+
+                if [ ! $(find /home -maxdepth 1 -type d -name "$user" 2>/dev/null) ]
+                then
+                        echo "this user does not exist" 1>&2
+                        exit 1
+                fi
+                if [  ! -f /home/"$user"/.question/questions/"$question"  ]
+                then
+                        echo "this question does not exist" 1>&2
+                        exit 1
+                fi
+
+		mkdir -p ~/.question/votes/$user
+		touch ~/.question/votes/$user/"$question"
+
+		if [ $# -eq 3 ]
+		then
+			voteNumber=$(egrep "(up|down)$" ~/.question/votes/$user/"$question"|wc -l)
+ 			if [ $voteNumber -lt 2 ]
+			then
+				echo $2 >> ~/.question/votes/$user/"$question"
+				exit 0
+			else
+				echo "you can vote twice at most" 1>&2
+				exit 1
+			fi
+		fi
+
+	 	if [ $# -eq 4 ]
+		then
+			IFS='/' read -ra ARR <<< "$4"
+               		respondent=${ARR[0]}
+               		answer=${ARR[1]}
+			if [ ! "$answer" ]
+			then
+				echo "For the 4th parameter you should follow the format 'user/answer'" 1>&2
+				exit 1
+			fi
+
+			if [ ! $(grep "$respondent" /home/unixtool/data/question/users ) ]
+			then	
+				echo "this respondent does not exist" 1>&2
+				exit 1
+			fi
+			if [ ! -f  /home/$respondent/.question/answers/$user/"$question"/"$answer" 2>/dev/null ] 
+			then
+				echo "this answer does not exist" 1>&2
+				exit 1
+			fi
+
+			voteNumber=$(grep $4 ~/.question/votes/"$user"/"$question"|wc -l)
+			if [ $voteNumber -lt 2 ]
+			then
+				echo "$2 $4">>~/.question/votes/"$user"/"$question"
+			 	exit 0
+			else 
+				echo "you can vote twice at most" 1>&2
+				exit 1
+			fi
+		fi
+		;;		
+	show) 
+	function showResult(){
+		
+		IFS='/' read -ra ARR <<< "$1"
+                user=${ARR[0]}
+                question=${ARR[1]}
+		if [ ! $(find /home -maxdepth 1 -type d -name "$user") ]
+                then
+                        echo "this user does not exist"
+                        exit 1
+                fi
+                if [ ! -f /home/"$user"/.question/questions/"$question" ]
+                then
+                        echo "this question does not exist" 1>&2
+                        exit 1
+		fi
+		v=0
+		vForQ=0
+		declare -A result
+		for owner in $( cat /home/unixtool/data/question/users)
+		do
+			declare -A arr
+
+			if [ ! -r /home/$owner/.question/votes/$user/"$question" 2>/dev/null ]
+			then	
+				continue
+			fi
+			if [ -r /home/$owner/.question/votes/$user/"$question" ]
+			then
+			#	echo $owner
+			#	echo "*********"
+				while read line
+				do
+					set $line
+					vote=$1
+					if [ -z $2 ]
+					then
+						vForQ=$vote
+				#		echo $vForQ
+					else
+						answer_id=$(echo $line|sed 's/^[^[:space:]]* \(.*\)$/\1/')						
+				#		echo $answer_id
+						arr["$answer_id"]=$vote
+				#		echo "key:$answer_id  value:${arr[$answer_id]}"
+					fi
+				done < /home/$owner/.question/votes/$user/"$question" 
+			fi
+
+			if [ $vForQ = up ]
+			then
+				v=$(($v+1))
+			#	echo $v
+			fi
+			if [ $vForQ = down ]
+			then 
+				v=$(($v-1))
+			fi
+			for i in "${!arr[@]}"
+			do
+				if [ ${arr[$i]}	= up ]
+				then
+					result[$i]=$((${result[$i]} + 1))
+				else
+					result[$i]=$((${result[$i]} - 1))
+				fi
+			done
+			unset arr
+		done
+		echo $v
+		cat /home/$user/.question/questions/"$question" 2>/dev/null
+		for i in "${!result[@]}"
+		do
+			echo "===="
+			echo "${result[$i]}" "$i"
+			IFS='/' read -ra ARR <<< "$i"
+	                user1=${ARR[0]}
+        	        answer=${ARR[1]}
+			cat /home/"$user1"/.question/answers/"$user"/"$question"/"$answer" 2>/dev/null
+		done
+		for owner in $( cat /home/unixtool/data/question/users)
+		do
+			x=$(find /home/"$owner"/.question/answers/"$user"/"$question"/ -type f 2>/dev/null|cut -d/ -f8)
+			
+			if [ -n "$x" ]
+			then
+			while read answerName
+			do
+				answerID="$owner"'/'"$answerName"
+				
+				if [ ! ${result["$answerID"]} ]
+				then
+					echo "===="
+                     	        	echo 0 "$answerID" 
+				        cat /home/"$owner"/.question/answers/"$user"/"$question"/"$answerName" 2>/dev/null
+	
+				fi	
+			done <<<"$x"
+			fi
+		done
+	}
+		shift
+		for var in "$@"
+		do
+			showResult "$var"
+		done
+		;;
+
+	*) showUsage
+		;;
+esac
+chmod -R 755 ~/.question
+fi
